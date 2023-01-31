@@ -3,10 +3,8 @@ module f5-tool-setup-cni
 go 1.19
 
 require (
-	gitee.com/zongzw/f5-bigip-rest v0.0.0-20221209030549-4a6915034940
-	github.com/projectcalico/api v0.0.0-20230125230755-7aed9df0e47b
+	gitee.com/zongzw/f5-bigip-rest v0.0.0-20230131084648-edaaecf77e42
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
 )
@@ -16,7 +14,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.9.0 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.20.0 // indirect
@@ -51,6 +48,7 @@ require (
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	k8s.io/api v0.26.1 // indirect
 	k8s.io/klog/v2 v2.80.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20221012153701-172d655c2280 // indirect
 	k8s.io/utils v0.0.0-20221128185143-99ec85e7a448 // indirect

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,15 +16,163 @@ import (
 
 	f5_bigip "gitee.com/zongzw/f5-bigip-rest/bigip"
 	"gitee.com/zongzw/f5-bigip-rest/utils"
-	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
-	calico_client "github.com/projectcalico/api/pkg/client/clientset_generated/clientset"
-	"github.com/projectcalico/api/pkg/lib/numorstring"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	confv1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
 
-func getConfigs(bigipConfigs *BIGIPConfigs, configPath string) error {
+func (cniconfs *CNIConfigs) Load(configPath, passwordPath, kubeConfigPath string) error {
+	if err := getConfigs(cniconfs, configPath); err != nil {
+		return err
+	}
+
+	var password string
+	if err := getCredentials(&password, passwordPath); err != nil {
+		return err
+	}
+
+	for i := range *cniconfs {
+		defaultPort := 443
+		(*cniconfs)[i].Management.password = password
+		if (*cniconfs)[i].Management.Port == nil {
+			(*cniconfs)[i].Management.Port = &defaultPort
+		}
+		(*cniconfs)[i].kubeConfig = kubeConfigPath
+	}
+	return nil
+}
+
+func (cniconfs *CNIConfigs) Dumps() string {
+	// fmt.Printf("%#v\n", config)
+	if bcs, err := json.MarshalIndent(cniconfs, "", "  "); err != nil {
+		slog.Warnf("failed to show the parsed configs: %s", err.Error())
+		return ""
+	} else {
+		return string(bcs)
+	}
+}
+
+func (cniconfs *CNIConfigs) Apply() error {
+	if err := cniconfs.applyToBIGIPs(); err != nil {
+		return err
+	}
+
+	if err := cniconfs.applyToK8S(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cniconfs *CNIConfigs) applyToBIGIPs() error {
+	errs := []string{}
+	for i, c := range *cniconfs {
+		bigip := f5_bigip.Initialize(c.bigipUrl(), c.Management.Username, c.Management.password, "debug")
+		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
+
+		if c.Calico != nil {
+			if err := c.setupCalicoOn(bc); err != nil {
+				errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
+				continue
+			}
+		}
+
+		if c.Flannel != nil {
+			if err := c.setupFlannelOn(bc); err != nil {
+				errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
+				continue
+			}
+		}
+	}
+	if len(errs) != 0 {
+		return fmt.Errorf(strings.Join(errs, "; "))
+	} else {
+		return nil
+	}
+}
+
+func (cniconfs *CNIConfigs) applyToK8S() error {
+	for _, cniconf := range *cniconfs {
+		if cniconf.Calico != nil {
+		}
+		if cniconf.Flannel != nil {
+			k8sclient := newKubeClient(cniconf.kubeConfig)
+			for _, nc := range cniconf.Flannel.NodeConfigs {
+				nodeName := fmt.Sprintf("bigip-%s", nc.PublicIP)
+				macAddr, err := cniconf.macAddrOf(nc.PublicIP)
+				if err != nil {
+					return err
+				}
+				nodeConf := confv1.Node(nodeName)
+				nodeConf.WithName(nodeName)
+				nodeConf.WithAnnotations(map[string]string{
+					"flannel.alpha.coreos.com/public-ip":           nc.PublicIP,
+					"flannel.alpha.coreos.com/backend-data":        fmt.Sprintf(`{"VtepMAC":"%s"}`, macAddr),
+					"flannel.alpha.coreos.com/backend-type":        "vxlan",
+					"flannel.alpha.coreos.com/kube-subnet-manager": "true",
+				})
+				nodeConf.WithSpec(confv1.NodeSpec().WithPodCIDR(nc.PodCIDR))
+				if _, err := k8sclient.CoreV1().Nodes().Apply(context.TODO(), nodeConf, v1.ApplyOptions{FieldManager: "v1"}); err != nil {
+					return err
+				} else {
+					slog.Infof("node %s created in k8s.", nodeName)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (cniconf *CNIConfig) macAddrOf(publicIP string) (string, error) {
+	if cniconf.Flannel == nil {
+		return "", fmt.Errorf("bigip config flannel is nil")
+	}
+	for _, tunnel := range cniconf.Flannel.Tunnels {
+		if tunnel.LocalAddress == publicIP {
+			return tunnel.tunnelMac, nil
+		}
+	}
+	return "", fmt.Errorf("no tunnel with IP address '%s' found in the config", publicIP)
+}
+
+func (cniconf *CNIConfig) bigipUrl() string {
+	return fmt.Sprintf("https://%s:%d", cniconf.Management.IpAddress, *cniconf.Management.Port)
+}
+
+func (cniconf *CNIConfig) setupFlannelOn(bc *f5_bigip.BIGIPContext) error {
+	for i, tunnel := range cniconf.Flannel.Tunnels {
+		if err := bc.CreateVxlanProfile(tunnel.ProfileName, fmt.Sprintf("%d", tunnel.Port)); err != nil {
+			return err
+		}
+		if err := bc.CreateTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName); err != nil {
+			return err
+		}
+		if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
+			return err
+		} else {
+			cniconf.Flannel.Tunnels[i].tunnelMac = mac
+		}
+	}
+	for _, selfip := range cniconf.Flannel.SelfIPs {
+		if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (cniconf *CNIConfig) setupCalicoOn(bc *f5_bigip.BIGIPContext) error {
+	if err := EnableBGPRouting(bc); err != nil {
+		return err
+	}
+	for _, selfip := range cniconf.Calico.SelfIPs {
+		if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getConfigs(CNIConfigs *CNIConfigs, configPath string) error {
 	fn := configPath
 	f, err := os.Open(fn)
 	if err != nil {
@@ -34,7 +183,7 @@ func getConfigs(bigipConfigs *BIGIPConfigs, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read file: %s: %s", fn, err)
 	}
-	if err := yaml.Unmarshal(byaml, &bigipConfigs); err != nil {
+	if err := yaml.Unmarshal(byaml, &CNIConfigs); err != nil {
 		return fmt.Errorf("failed to unmarshal yaml content: %s", err.Error())
 	}
 	return nil
@@ -51,72 +200,6 @@ func getCredentials(bigipPassword *string, pwPath string) error {
 		} else {
 			*bigipPassword = string(b)
 		}
-		return nil
-	}
-}
-
-func setupBIGIPs(config *BIGIPConfigs) error {
-	if config == nil {
-		return nil
-	}
-	errs := []string{}
-	for i, c := range *config {
-		if c.Management == nil {
-			errs = append(errs, fmt.Sprintf("config #%d: missing management section", i))
-			continue
-		}
-
-		if c.Management.Port == nil {
-			*c.Management.Port = 443
-		}
-		url := fmt.Sprintf("https://%s:%d", c.Management.IpAddress, *c.Management.Port)
-		username := c.Management.Username
-		password := c.Management.password
-		bigip := f5_bigip.Initialize(url, username, password, "debug")
-
-		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
-
-		if c.Calico != nil {
-			if err := EnableBGPRouting(bc); err != nil {
-				errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-				continue
-			}
-			for _, selfip := range c.Calico.SelfIPs {
-				if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
-					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-					continue
-				}
-			}
-		}
-
-		if c.Flannel != nil {
-			for i, tunnel := range c.Flannel.Tunnels {
-				if err := bc.CreateVxlanProfile(tunnel.ProfileName, fmt.Sprintf("%d", tunnel.Port)); err != nil {
-					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-					continue
-				}
-				if err := bc.CreateVxlanTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName); err != nil {
-					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-					continue
-				}
-				if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
-					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-					continue
-				} else {
-					c.Flannel.Tunnels[i].tunnelMac = mac
-				}
-			}
-			for _, selfip := range c.Flannel.SelfIPs {
-				if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
-					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-					continue
-				}
-			}
-		}
-	}
-	if len(errs) != 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
-	} else {
 		return nil
 	}
 }
@@ -152,91 +235,6 @@ func EnableBGPRouting(bc *f5_bigip.BIGIPContext) error {
 	return bc.ModifyDbValue("tmrouted.tmos.routing", "enable")
 }
 
-func setupK8S(config *BIGIPConfigs) error {
-	if config == nil {
-		return nil
-	}
-	for i, bipconf := range *config {
-		if bipconf.Calico != nil {
-			calicoset := newCalicoClient(kubeConfig)
-			bgpConfInf := calicoset.ProjectcalicoV3().BGPConfigurations()
-			bgpConfig, err := bgpConfInf.Get(context.TODO(), "default", v1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			if bgpConfig == nil {
-				var err error
-				if bgpConfig, err = bgpConfInf.Create(context.TODO(), v3.NewBGPConfiguration(), v1.CreateOptions{}); err != nil {
-					return err
-				}
-			}
-
-			if as, err := numorstring.ASNumberFromString(bipconf.Calico.RemoteAS); err != nil {
-				return err
-			} else {
-				*bgpConfig.Spec.ASNumber = as
-			}
-
-			bgpConfig.Spec.LogSeverityScreen = "Info"
-			*bgpConfig.Spec.NodeToNodeMeshEnabled = true
-
-			if _, err := bgpConfInf.Update(context.TODO(), bgpConfig, v1.UpdateOptions{}); err != nil {
-				return err
-			}
-
-			bgpPrInf := calicoset.ProjectcalicoV3().BGPPeers()
-			bgpPeerName := fmt.Sprintf("bgppeer-biggip%d", i+1)
-			bgpPeer, err := calicoset.ProjectcalicoV3().BGPPeers().Get(context.TODO(), bgpPeerName, v1.GetOptions{})
-			if err != nil {
-				return nil
-			}
-
-			if bgpPeer == nil {
-				var err error
-				if bgpPeer, err = bgpPrInf.Create(context.TODO(), v3.NewBGPPeer(), v1.CreateOptions{}); err != nil {
-					return err
-				}
-			}
-
-			bgpPeer.Spec.PeerIP = bipconf.Management.IpAddress
-			if as, err := numorstring.ASNumberFromString(bipconf.Calico.LocalAS); err != nil {
-				return err
-			} else {
-				bgpPeer.Spec.ASNumber = as
-			}
-
-			if _, err := bgpPrInf.Update(context.TODO(), bgpPeer, v1.UpdateOptions{}); err != nil {
-				return err
-			}
-		}
-		if bipconf.Flannel != nil {
-			k8sclient := newKubeClient(kubeConfig)
-			for _, nc := range bipconf.Flannel.NodeConfigs {
-				nodeName := fmt.Sprintf("bigip-%s", nc.PublicIP)
-				macAddr, err := bipconf.macAddrOf(nc.PublicIP)
-				if err != nil {
-					return err
-				}
-				nodeConf := confv1.Node(nodeName)
-				nodeConf.WithName(nodeName)
-				nodeConf.WithAnnotations(map[string]string{
-					"flannel.alpha.coreos.com/public-ip":           nc.PublicIP,
-					"flannel.alpha.coreos.com/backend-data":        fmt.Sprintf(`{"VtepMAC":"%s"}`, macAddr),
-					"flannel.alpha.coreos.com/backend-type":        "vxlan",
-					"flannel.alpha.coreos.com/kube-subnet-manager": "true",
-				})
-				nodeConf.WithSpec(confv1.NodeSpec().WithPodCIDR(nc.PodCIDR))
-				if _, err := k8sclient.CoreV1().Nodes().Apply(context.TODO(), nodeConf, v1.ApplyOptions{FieldManager: "v1"}); err != nil {
-					return err
-				} else {
-					slog.Infof("node %s created in k8s.", nodeName)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func newRestConfig(kubeConfig string) *rest.Config {
 	var config *rest.Config
 	var err error
@@ -262,26 +260,14 @@ func newKubeClient(kubeConfig string) *kubernetes.Clientset {
 	return client
 }
 
-func newCalicoClient(kubeConfig string) *calico_client.Clientset {
-	config := newRestConfig(kubeConfig)
-	client, err := calico_client.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
-	return client
-}
-
-func (bipconf *BIGIPConfig) macAddrOf(publicIP string) (string, error) {
-	if bipconf.Flannel == nil {
-		return "", fmt.Errorf("bigip config flannel is nil")
-	}
-	for _, tunnel := range bipconf.Flannel.Tunnels {
-		if tunnel.LocalAddress == publicIP {
-			return tunnel.tunnelMac, nil
-		}
-	}
-	return "", fmt.Errorf("no tunnel with IP address '%s' found in the config", publicIP)
-}
+// func newCalicoClient(kubeConfig string) *calico_client.Clientset {
+// 	config := newRestConfig(kubeConfig)
+// 	client, err := calico_client.NewForConfig(config)
+// 	if err != nil {
+// 		panic(err.Error())
+// 	}
+// 	return client
+// }
 
 func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 	slog := utils.LogFromContext(bc.Context)
@@ -300,7 +286,7 @@ func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 			}
 			return macAddress, nil
 		} else {
-			return "", fmt.Errorf("empty response from tmsh %s, no macaddr retrived", cmd)
+			return "", fmt.Errorf("empty response from tmsh '%s', no macaddr retrived", cmd)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 package main
 
-type BIGIPConfigs []BIGIPConfig
+type CNIConfigs []CNIConfig
 
 type BIGIPSelfIP struct {
 	Name             string
@@ -8,8 +8,8 @@ type BIGIPSelfIP struct {
 	VlanOrTunnelName string `yaml:"vlanOrTunnelName"`
 }
 
-type BIGIPConfig struct {
-	Management *struct {
+type CNIConfig struct {
+	Management struct {
 		Username  string
 		IpAddress string `yaml:"ipAddress"`
 		Port      *int
@@ -35,4 +35,5 @@ type BIGIPConfig struct {
 		SelfIPs  []BIGIPSelfIP `yaml:"selfIPs"`
 		PeerIPs  []string      `yaml:"peerIP"`
 	}
+	kubeConfig string
 }

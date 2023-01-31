@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
+	"os"
 
 	"gitee.com/zongzw/f5-bigip-rest/utils"
 )
@@ -15,38 +15,22 @@ func init() {
 }
 
 func main() {
-	var bigipConfig string
-	var pwConfig string
+	var bigipConfig, passwordConfig, kubeConfig string
 	flag.StringVar(&kubeConfig, "kube-config", "", "kube configuration file: i.e. ~/.kube/config")
 	flag.StringVar(&bigipConfig, "bigip-config", "./config.yaml", "BIG-IP configuration yaml file.")
-	flag.StringVar(&pwConfig, "bigip-password", "./password", "BIG-IP admin password.")
+	flag.StringVar(&passwordConfig, "bigip-password", "./password", "BIG-IP admin password.")
 	flag.Parse()
 
-	var config BIGIPConfigs
-	var password string
-	if err := getConfigs(&config, bigipConfig); err != nil {
-		panic(err)
-	}
-	if err := getCredentials(&password, pwConfig); err != nil {
-		panic(err)
-	}
-
-	for i := range config {
-		config[i].Management.password = password
-	}
-
-	// fmt.Printf("%#v\n", config)
-	if bcs, err := json.MarshalIndent(config, "", "  "); err != nil {
-		panic(err)
+	var config CNIConfigs
+	if err := config.Load(bigipConfig, passwordConfig, kubeConfig); err != nil {
+		slog.Errorf(err.Error())
+		os.Exit(1)
 	} else {
-		slog.Debugf("configs: %s", bcs)
+		slog.Debugf(config.Dumps())
 	}
 
-	if err := setupBIGIPs(&config); err != nil {
-		panic(err)
-	}
-
-	if err := setupK8S(&config); err != nil {
-		panic(err)
+	if err := config.Apply(); err != nil {
+		slog.Errorf(err.Error())
+		os.Exit(1)
 	}
 }
