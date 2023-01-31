@@ -17,6 +17,10 @@ func main() {
 		panic(err)
 	}
 
+	for i := range config {
+		config[i].Management.password = password
+	}
+
 	// fmt.Printf("%#v\n", config)
 	if bcs, err := json.MarshalIndent(config, "", "  "); err != nil {
 		panic(err)
@@ -24,7 +28,7 @@ func main() {
 		fmt.Printf("configs: %s\n", bcs)
 	}
 
-	if err := setupBIGIPs(&config, password); err != nil {
+	if err := setupBIGIPs(&config); err != nil {
 		panic(err)
 	}
 }

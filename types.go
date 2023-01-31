@@ -2,11 +2,18 @@ package main
 
 type BIGIPConfigs []BIGIPConfig
 
+type BIGIPSelfIP struct {
+	Name             string
+	IpMask           string `yaml:"ipMask"`
+	VlanOrTunnelName string `yaml:"vlanOrTunnelName"`
+}
+
 type BIGIPConfig struct {
 	Management *struct {
 		Username  string
 		IpAddress string `yaml:"ipAddress"`
 		Port      *int
+		password  string
 	}
 	Flannel *struct {
 		Tunnels []struct {
@@ -15,14 +22,11 @@ type BIGIPConfig struct {
 			Port         int
 			LocalAddress string `yaml:"localAddress"`
 		}
-		SelfIPs []struct {
-			Name       string
-			IpMask     string `yaml:"ipMask"`
-			TunnelName string `yaml:"vlanOrTunnelName"`
-		} `yaml:"selfIPs"`
+		SelfIPs []BIGIPSelfIP `yaml:"selfIPs"`
 	}
 	Calico *struct {
-		LocalAS  string `yaml:"localAS"`
-		RemoteAS string `yaml:"remoteAS"`
+		LocalAS  string        `yaml:"localAS"`
+		RemoteAS string        `yaml:"remoteAS"`
+		SelfIPs  []BIGIPSelfIP `yaml:"selfIPs"`
 	}
 }

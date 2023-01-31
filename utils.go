@@ -44,7 +44,7 @@ func getCredentials(bigipPassword *string, pwPath string) error {
 	}
 }
 
-func setupBIGIPs(config *BIGIPConfigs, password string) error {
+func setupBIGIPs(config *BIGIPConfigs) error {
 	if config == nil {
 		return nil
 	}
@@ -60,6 +60,7 @@ func setupBIGIPs(config *BIGIPConfigs, password string) error {
 		}
 		url := fmt.Sprintf("https://%s:%d", c.Management.IpAddress, *c.Management.Port)
 		username := c.Management.Username
+		password := c.Management.password
 		bigip := f5_bigip.Initialize(url, username, password, "debug")
 
 		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
@@ -68,6 +69,12 @@ func setupBIGIPs(config *BIGIPConfigs, password string) error {
 			if err := EnableBGPRouting(bc); err != nil {
 				errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
 				continue
+			}
+			for _, selfip := range c.Calico.SelfIPs {
+				if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
+					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
+					continue
+				}
 			}
 		}
 
@@ -83,7 +90,7 @@ func setupBIGIPs(config *BIGIPConfigs, password string) error {
 				}
 			}
 			for _, selfip := range c.Flannel.SelfIPs {
-				if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.TunnelName); err != nil {
+				if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
 					errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
 					continue
 				}
