@@ -21,12 +21,18 @@ type BIGIPConfig struct {
 			ProfileName  string `yaml:"profileName"`
 			Port         int
 			LocalAddress string `yaml:"localAddress"`
+			tunnelMac    string
 		}
-		SelfIPs []BIGIPSelfIP `yaml:"selfIPs"`
+		SelfIPs     []BIGIPSelfIP `yaml:"selfIPs"`
+		NodeConfigs []struct {
+			PublicIP string `yaml:"publicIP"`
+			PodCIDR  string `yaml:"podCIDR"`
+		} `yaml:"nodeConfigs"`
 	}
 	Calico *struct {
 		LocalAS  string        `yaml:"localAS"`
 		RemoteAS string        `yaml:"remoteAS"`
 		SelfIPs  []BIGIPSelfIP `yaml:"selfIPs"`
+		PeerIPs  []string      `yaml:"peerIP"`
 	}
 }
