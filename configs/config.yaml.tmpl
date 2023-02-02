@@ -1,0 +1,32 @@
+- management:
+    ipAddress: 10.250.2.219
+    username: admin
+  flannel:
+    tunnels:
+      - name: fl-tunnel
+        profileName: fl-vxlan
+        port: 8472
+        localAddress: 10.250.17.123
+    selfIPs:
+      - name: flannel-self
+        ipMask: 10.42.20.1/16
+        vlanOrTunnelName: fl-tunnel
+      - name: self-17
+        ipMask: 10.250.17.123/24
+        vlanOrTunnelName: vlan-17
+    nodeConfigs:
+      - publicIP: 10.250.17.123
+        podCIDR: 10.42.20.0/24
+      
+# - management:
+#     ipAddress: 10.250.2.220
+#     username: admin
+#   calico:
+#     localAS: *as 64512
+#     remoteAS: &as
+#     selfIPs:
+#       - name: self-17
+#         ipMask: 10.250.17.124/24
+#         vlanOrTunnelName: vlan-17
+#     peerIPs:
+#       - 10.250.17.124
