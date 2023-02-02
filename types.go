@@ -33,7 +33,7 @@ type CNIConfig struct {
 		LocalAS  string        `yaml:"localAS"`
 		RemoteAS string        `yaml:"remoteAS"`
 		SelfIPs  []BIGIPSelfIP `yaml:"selfIPs"`
-		PeerIPs  []string      `yaml:"peerIP"`
+		PeerIPs  []string      `yaml:"peerIPs"`
 	}
 	kubeConfig string
 }

@@ -4,6 +4,12 @@ go 1.19
 
 require (
 	gitee.com/zongzw/f5-bigip-rest v0.0.0-20230131084648-edaaecf77e42
+	// https://github.com/projectcalico/api/issues/64
+	// github.com/projectcalico/api v0.0.0-20230125230755-7aed9df0e47b
+	github.com/projectcalico/api v0.0.0-20220722155641-439a754a988b
+	// # cannot be used since it's NOT a standard module
+	// # search "go.mod incompatible"
+	// github.com/projectcalico/calico v3.25.0+incompatible
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1

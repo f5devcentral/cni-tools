@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -18,6 +20,8 @@ import (
 	"gitee.com/zongzw/f5-bigip-rest/utils"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	confv1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
 
@@ -93,6 +97,70 @@ func (cniconfs *CNIConfigs) applyToBIGIPs() error {
 func (cniconfs *CNIConfigs) applyToK8S() error {
 	for _, cniconf := range *cniconfs {
 		if cniconf.Calico != nil {
+			calicoset := newCalicoClient(cniconf.kubeConfig)
+
+			gvrBGPConf := schema.GroupVersionResource{
+				Group:    "crd.projectcalico.org",
+				Version:  "v1",
+				Resource: "bgpconfigurations",
+			}
+			remoteAS, err1 := strconv.ParseInt(cniconf.Calico.RemoteAS, 10, 0)
+			localAS, err2 := strconv.ParseInt(cniconf.Calico.LocalAS, 10, 0)
+			if err1 != nil || err2 != nil {
+				return fmt.Errorf("failed to parse as number from input: %v %v", err1, err2)
+			}
+			bgpConfName := "default"
+			confyaml := unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "crd.projectcalico.org/v1",
+					"kind":       "BGPConfiguration",
+					"metadata":   map[string]interface{}{"name": bgpConfName},
+					"spec": map[string]interface{}{
+						"asNumber":              remoteAS,
+						"logSeverityScreen":     "Info",
+						"nodeToNodeMeshEnabled": true,
+					},
+				},
+			}
+			applyedConf, err := calicoset.Resource(gvrBGPConf).Apply(context.TODO(), bgpConfName, &confyaml, v1.ApplyOptions{FieldManager: gvrBGPConf.GroupVersion().String()})
+
+			if err != nil {
+				return err
+			} else {
+				slog.Debugf("successfully applied BGPConfiguration: %s", applyedConf.GetName())
+			}
+
+			gvrBGPPr := schema.GroupVersionResource{
+				Group:    "crd.projectcalico.org",
+				Version:  "v1",
+				Resource: "bgppeers",
+			}
+
+			for _, prIP := range cniconf.Calico.PeerIPs {
+				bgpPeerName := fmt.Sprintf("bgppeer-bigip-%s", prIP)
+				pryaml := unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"apiVersion": "crd.projectcalico.org/v1",
+						"kind":       "BGPPeer",
+						"metadata": map[string]interface{}{
+							"name": bgpPeerName,
+						},
+
+						"spec": map[string]interface{}{
+							"asNumber": localAS,
+							"peerIP":   prIP,
+						},
+					},
+				}
+
+				appliedPr, err := calicoset.Resource(gvrBGPPr).Apply(context.TODO(), bgpPeerName, &pryaml, v1.ApplyOptions{FieldManager: gvrBGPConf.GroupVersion().String()})
+				if err != nil {
+					return err
+				} else {
+					slog.Debugf("successfully applied BGPPeer: %s", appliedPr.GetName())
+				}
+			}
+
 		}
 		if cniconf.Flannel != nil {
 			k8sclient := newKubeClient(cniconf.kubeConfig)
@@ -251,6 +319,7 @@ func newRestConfig(kubeConfig string) *rest.Config {
 	}
 	return config
 }
+
 func newKubeClient(kubeConfig string) *kubernetes.Clientset {
 	config := newRestConfig(kubeConfig)
 	client, err := kubernetes.NewForConfig(config)
@@ -260,14 +329,14 @@ func newKubeClient(kubeConfig string) *kubernetes.Clientset {
 	return client
 }
 
-// func newCalicoClient(kubeConfig string) *calico_client.Clientset {
-// 	config := newRestConfig(kubeConfig)
-// 	client, err := calico_client.NewForConfig(config)
-// 	if err != nil {
-// 		panic(err.Error())
-// 	}
-// 	return client
-// }
+func newCalicoClient(kubeConfig string) *dynamic.DynamicClient {
+	config := newRestConfig(kubeConfig)
+	client, err := dynamic.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+	return client
+}
 
 func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 	slog := utils.LogFromContext(bc.Context)
