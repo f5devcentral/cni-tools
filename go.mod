@@ -3,7 +3,6 @@ module f5-tool-setup-cni
 go 1.19
 
 require (
-	gitee.com/zongzw/f5-bigip-rest v0.0.0-20230131084648-edaaecf77e42
 	// # cannot be used since it's NOT a standard module
 	// # search "go.mod incompatible"
 	// github.com/projectcalico/calico v3.25.0+incompatible
@@ -11,6 +10,8 @@ require (
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
 )
+
+require gitee.com/zongzw/f5-bigip-rest v0.0.0-20230205094548-4547081581c6
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

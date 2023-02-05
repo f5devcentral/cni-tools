@@ -9,9 +9,7 @@ import (
 )
 
 func init() {
-	// BIGIPs = []*f5_bigip.BIGIP{}
-	// kubeConfig = "/Users/zong/.kube/config"
-	slog = utils.LogFromContext(context.TODO())
+	slog = utils.LogFromContext(context.TODO()).WithLevel(utils.LogLevel_Type_DEBUG)
 }
 
 func main() {
