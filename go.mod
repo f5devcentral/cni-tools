@@ -11,7 +11,7 @@ require (
 	k8s.io/client-go v0.26.1
 )
 
-require gitee.com/zongzw/f5-bigip-rest v0.0.0-20230205094548-4547081581c6
+require gitee.com/zongzw/f5-bigip-rest v0.0.0-20230206042033-3ebe5fb7e08f
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

@@ -24,7 +24,7 @@ func main() {
 		slog.Errorf(err.Error())
 		os.Exit(1)
 	} else {
-		slog.Debugf(config.Dumps())
+		slog.Infof(config.Dumps())
 	}
 
 	if err := config.Apply(); err != nil {
