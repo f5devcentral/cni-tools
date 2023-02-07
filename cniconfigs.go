@@ -8,10 +8,13 @@ import (
 	"strings"
 
 	f5_bigip "gitee.com/zongzw/f5-bigip-rest/bigip"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	confv1 "k8s.io/client-go/applyconfigurations/core/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func (cniconfs *CNIConfigs) Load(configPath, passwordPath, kubeConfigPath string) error {
@@ -56,10 +59,24 @@ func (cniconfs *CNIConfigs) Apply() error {
 	return nil
 }
 
+func (cniconfs *CNIConfigs) OnTrace(mgr manager.Manager, loglevel string) error {
+	rNode := &NodeReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		LogLevel: loglevel,
+		Configs:  cniconfs,
+	}
+	err := ctrl.NewControllerManagedBy(mgr).For(&v1.Node{}).Complete(rNode)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (cniconfs *CNIConfigs) applyToBIGIPs() error {
 	errs := []string{}
 	for i, c := range *cniconfs {
-		bigip := f5_bigip.Initialize(c.bigipUrl(), c.Management.Username, c.Management.password, "debug")
+		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
 		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
 
 		if c.Calico != nil {
@@ -117,7 +134,7 @@ func (cniconf *CNIConfig) bigipUrl() string {
 
 func (cniconf *CNIConfig) setupCalicoOnK8S() error {
 	group, version := "crd.projectcalico.org", "v1"
-	applyOps := v1.ApplyOptions{FieldManager: strings.Join([]string{group, version}, "/")}
+	applyOps := metav1.ApplyOptions{FieldManager: strings.Join([]string{group, version}, "/")}
 
 	calicoset := newCalicoClient(cniconf.kubeConfig)
 
@@ -201,7 +218,7 @@ func (cniconf *CNIConfig) setupFlannelOnK8S() error {
 			"flannel.alpha.coreos.com/kube-subnet-manager": "true",
 		})
 		nodeConf.WithSpec(confv1.NodeSpec().WithPodCIDR(nc.PodCIDR))
-		if _, err := k8sclient.CoreV1().Nodes().Apply(context.TODO(), nodeConf, v1.ApplyOptions{FieldManager: "v1"}); err != nil {
+		if _, err := k8sclient.CoreV1().Nodes().Apply(context.TODO(), nodeConf, metav1.ApplyOptions{FieldManager: "v1"}); err != nil {
 			return err
 		} else {
 			slog.Infof("node %s created in k8s.", nodeName)

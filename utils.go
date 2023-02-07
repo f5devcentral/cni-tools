@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -134,4 +137,151 @@ func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 			return "", fmt.Errorf("empty response from tmsh '%s', no macaddr retrived", cmd)
 		}
 	}
+}
+
+func ParseNodeConfigs(cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]interface{}, error) {
+	cfgs := map[string]interface{}{}
+
+	if cniconf.Calico != nil {
+		nIpAddresses := allNodeIpAddrs(nodeList)
+		if ccfgs, err := parseNeighsFrom("gwcBGP", cniconf.Calico.LocalAS, cniconf.Calico.RemoteAS, nIpAddresses); err != nil {
+			return map[string]interface{}{}, err
+		} else {
+			for k, v := range ccfgs {
+				cfgs[k] = v
+			}
+		}
+	}
+
+	if cniconf.Flannel != nil {
+		nIpToMacV4, _ := allNodeIPMacAddrs(nodeList)
+		for _, tunnel := range cniconf.Flannel.Tunnels {
+			if fcfgs, err := parseFdbsFrom(tunnel.Name, nIpToMacV4); err != nil {
+				return map[string]interface{}{}, err
+			} else {
+				for k, v := range fcfgs {
+					cfgs[k] = v
+				}
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"": cfgs,
+	}, nil
+}
+
+func allNodeIpAddrs(ns *v1.NodeList) []string {
+	rlt := []string{}
+	ipv4, ipv6 := allNodeIPMacAddrs(ns)
+	for k := range ipv4 {
+		rlt = append(rlt, k)
+	}
+	for k := range ipv6 {
+		rlt = append(rlt, k)
+	}
+	return rlt
+}
+
+func nodeIsTaint(n *v1.Node) bool {
+	for _, taint := range n.Spec.Taints {
+		if taint.Key == "node.kubernetes.io/unreachable" && taint.Effect == "NoSchedule" {
+			return true
+		}
+	}
+	return false
+}
+
+func allNodeIPMacAddrs(ns *v1.NodeList) (map[string]string, map[string]string) {
+	rlt4 := map[string]string{}
+	rlt6 := map[string]string{}
+
+	for _, n := range ns.Items {
+		if nodeIsTaint(&n) {
+			continue
+		}
+		ipaddrv4, ipaddrv6 := "", ""
+		macv4, macv6 := "", ""
+		// calico
+		if _, ok := n.Annotations["projectcalico.org/IPv4Address"]; ok {
+			// no mac addr found in 'kubectl get nodes -o yaml'
+			ipmask := n.Annotations["projectcalico.org/IPv4Address"]
+			ipaddrv4 = strings.Split(ipmask, "/")[0]
+		} else {
+			// flannel v4
+			if _, ok := n.Annotations["flannel.alpha.coreos.com/backend-data"]; ok {
+				ipmask := n.Annotations["flannel.alpha.coreos.com/public-ip"]
+				ipaddrv4 = strings.Split(ipmask, "/")[0]
+				macStr := n.Annotations["flannel.alpha.coreos.com/backend-data"]
+				var v map[string]interface{}
+				err := json.Unmarshal([]byte(macStr), &v)
+				if err != nil {
+					slog.Errorf("failed to get mac of %s: %s", n.Name, err.Error())
+				}
+				macv4 = v["VtepMAC"].(string)
+			}
+			// flannel v6
+			if _, ok := n.Annotations["flannel.alpha.coreos.com/backend-v6-data"]; ok {
+				ipaddrv6 = n.Annotations["flannel.alpha.coreos.com/public-ipv6"]
+				macStrV6 := n.Annotations["flannel.alpha.coreos.com/backend-v6-data"]
+				var v6 map[string]interface{}
+				err := json.Unmarshal([]byte(macStrV6), &v6)
+				if err != nil {
+					slog.Errorf("failed to get mac v6 of %s: %s", n.Name, err.Error())
+				}
+				macv6 = v6["VtepMAC"].(string)
+			}
+		}
+		if ipaddrv4 != "" {
+			rlt4[ipaddrv4] = macv4
+		}
+		if ipaddrv6 != "" {
+			rlt6[ipaddrv6] = macv6
+		}
+
+	}
+	return rlt4, rlt6
+}
+
+func parseNeighsFrom(routerName, localAs, remoteAs string, addresses []string) (map[string]interface{}, error) {
+	rlt := map[string]interface{}{}
+
+	name := strings.Join([]string{"Common", routerName}, ".")
+	rlt["net/routing/bgp/"+name] = map[string]interface{}{
+		"name":     name,
+		"localAs":  localAs,
+		"neighbor": []interface{}{},
+	}
+
+	fmtneigs := []interface{}{}
+	for _, address := range addresses {
+		fmtneigs = append(fmtneigs, map[string]interface{}{
+			"name":     address,
+			"remoteAs": remoteAs,
+		})
+	}
+
+	rlt["net/routing/bgp/"+name].(map[string]interface{})["neighbor"] = fmtneigs
+
+	return rlt, nil
+}
+
+func parseFdbsFrom(tunnelName string, iPToMac map[string]string) (map[string]interface{}, error) {
+	rlt := map[string]interface{}{}
+
+	rlt["net/fdb/tunnel/"+tunnelName] = map[string]interface{}{
+		"records": []interface{}{},
+	}
+
+	fmtrecords := []interface{}{}
+	for ip, mac := range iPToMac {
+		fmtrecords = append(fmtrecords, map[string]string{
+			"name":     mac,
+			"endpoint": ip,
+		})
+	}
+
+	rlt["net/fdb/tunnel/"+tunnelName].(map[string]interface{})["records"] = fmtrecords
+
+	return rlt, nil
 }
