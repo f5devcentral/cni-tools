@@ -18,7 +18,7 @@ import (
 
 func main() {
 	var bigipConfig, passwordConfig, kubeConfig string
-	flag.StringVar(&kubeConfig, "kube-config", "", "kube configuration file: i.e. ~/.kube/config")
+	flag.StringVar(&kubeConfig, "kube-config", "", "Paths to a kubeconfig. Only required if out-of-cluster. i.e. ~/.kube/config")
 	flag.StringVar(&bigipConfig, "bigip-config", "./config.yaml", "BIG-IP configuration yaml file.")
 	flag.StringVar(&passwordConfig, "bigip-password", "./password", "BIG-IP admin password.")
 	flag.Parse()
