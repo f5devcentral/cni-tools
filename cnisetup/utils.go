@@ -1,6 +1,7 @@
-package main
+package cnisetup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,10 @@ import (
 	f5_bigip "gitee.com/zongzw/f5-bigip-rest/bigip"
 	"gitee.com/zongzw/f5-bigip-rest/utils"
 )
+
+// func init() {
+// 	slog = utils.LogFromContext(context.TODO()).WithLevel(utils.LogLevel_Type_DEBUG)
+// }
 
 func getConfigs(CNIConfigs *CNIConfigs, configPath string) error {
 	fn := configPath
@@ -139,11 +144,11 @@ func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 	}
 }
 
-func ParseNodeConfigs(cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]interface{}, error) {
+func ParseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]interface{}, error) {
 	cfgs := map[string]interface{}{}
 
 	if cniconf.Calico != nil {
-		nIpAddresses := allNodeIpAddrs(nodeList)
+		nIpAddresses := allNodeIpAddrs(ctx, nodeList)
 		if ccfgs, err := parseNeighsFrom("gwcBGP", cniconf.Calico.LocalAS, cniconf.Calico.RemoteAS, nIpAddresses); err != nil {
 			return map[string]interface{}{}, err
 		} else {
@@ -154,7 +159,7 @@ func ParseNodeConfigs(cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]int
 	}
 
 	if cniconf.Flannel != nil {
-		nIpToMacV4, _ := allNodeIPMacAddrs(nodeList)
+		nIpToMacV4, _ := allNodeIPMacAddrs(ctx, nodeList)
 		for _, tunnel := range cniconf.Flannel.Tunnels {
 			if fcfgs, err := parseFdbsFrom(tunnel.Name, nIpToMacV4); err != nil {
 				return map[string]interface{}{}, err
@@ -171,9 +176,9 @@ func ParseNodeConfigs(cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]int
 	}, nil
 }
 
-func allNodeIpAddrs(ns *v1.NodeList) []string {
+func allNodeIpAddrs(ctx context.Context, ns *v1.NodeList) []string {
 	rlt := []string{}
-	ipv4, ipv6 := allNodeIPMacAddrs(ns)
+	ipv4, ipv6 := allNodeIPMacAddrs(ctx, ns)
 	for k := range ipv4 {
 		rlt = append(rlt, k)
 	}
@@ -192,7 +197,8 @@ func nodeIsTaint(n *v1.Node) bool {
 	return false
 }
 
-func allNodeIPMacAddrs(ns *v1.NodeList) (map[string]string, map[string]string) {
+func allNodeIPMacAddrs(ctx context.Context, ns *v1.NodeList) (map[string]string, map[string]string) {
+	slog := utils.LogFromContext(ctx)
 	rlt4 := map[string]string{}
 	rlt6 := map[string]string{}
 

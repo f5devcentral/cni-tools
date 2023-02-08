@@ -1,4 +1,4 @@
-package main
+package cnisetup
 
 import (
 	"context"
@@ -16,28 +16,29 @@ import (
 
 type NodeReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	LogLevel string
-	Configs  *CNIConfigs
+	Scheme     *runtime.Scheme
+	LogLevel   string
+	CNIConfigs *CNIConfigs
 }
 
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	lctx := context.WithValue(ctx, utils.CtxKey_Logger, utils.NewLog().WithRequestID(uuid.New().String()).WithLevel(r.LogLevel))
+	slog := utils.LogFromContext(lctx)
 	var nodeList v1.NodeList
 	err := r.List(context.TODO(), &nodeList, &client.ListOptions{})
 	if err != nil {
 		slog.Errorf("failed to list nodes: %s", err.Error())
 		return ctrl.Result{}, err
 	}
-	lctx := context.WithValue(ctx, utils.CtxKey_Logger, utils.NewLog().WithRequestID(uuid.New().String()).WithLevel(r.LogLevel))
-	// slog.Debugf("node event: %s", req.Name)
+	slog.Infof("node event: %s", req.Name)
 	ocfgs := map[string]interface{}{}
 	ncfgs := map[string]interface{}{}
 
-	if r.Configs == nil {
+	if r.CNIConfigs == nil {
 		return ctrl.Result{}, fmt.Errorf("no cni configs provided")
 	}
-	for _, c := range *r.Configs {
-		if ncfgs, err = ParseNodeConfigs(&c, &nodeList); err != nil {
+	for _, c := range *r.CNIConfigs {
+		if ncfgs, err = ParseNodeConfigs(lctx, &c, &nodeList); err != nil {
 			return ctrl.Result{}, err
 		}
 		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
@@ -45,7 +46,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		if err := deploy(bc, "Common", &ocfgs, &ncfgs); err != nil {
 			slog.Errorf("failed to do deployment: %s", err.Error())
-			continue
+			return ctrl.Result{}, err
 		}
 	}
 	return ctrl.Result{}, nil

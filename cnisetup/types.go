@@ -1,4 +1,11 @@
-package main
+package cnisetup
+
+import "context"
+
+type CNIContext struct {
+	CNIConfigs
+	context.Context
+}
 
 type CNIConfigs []CNIConfig
 

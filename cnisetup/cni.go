@@ -1,4 +1,4 @@
-package main
+package cnisetup
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	f5_bigip "gitee.com/zongzw/f5-bigip-rest/bigip"
+	"gitee.com/zongzw/f5-bigip-rest/utils"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -38,9 +39,10 @@ func (cniconfs *CNIConfigs) Load(configPath, passwordPath, kubeConfigPath string
 	return nil
 }
 
-func (cniconfs *CNIConfigs) Dumps() string {
+func (cnictx *CNIContext) Dumps() string {
+	slog := utils.LogFromContext(cnictx.Context)
 	// fmt.Printf("%#v\n", config)
-	if bcs, err := json.MarshalIndent(cniconfs, "", "  "); err != nil {
+	if bcs, err := json.MarshalIndent(cnictx.CNIConfigs, "", "  "); err != nil {
 		slog.Warnf("failed to show the parsed configs: %s", err.Error())
 		return ""
 	} else {
@@ -48,23 +50,23 @@ func (cniconfs *CNIConfigs) Dumps() string {
 	}
 }
 
-func (cniconfs *CNIConfigs) Apply() error {
-	if err := cniconfs.applyToBIGIPs(); err != nil {
+func (cnictx *CNIContext) Apply() error {
+	if err := cnictx.applyToBIGIPs(); err != nil {
 		return err
 	}
 
-	if err := cniconfs.applyToK8S(); err != nil {
+	if err := cnictx.applyToK8S(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (cniconfs *CNIConfigs) OnTrace(mgr manager.Manager, loglevel string) error {
+func (cnictx *CNIContext) OnTrace(mgr manager.Manager, loglevel string) error {
 	rNode := &NodeReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		LogLevel: loglevel,
-		Configs:  cniconfs,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		LogLevel:   loglevel,
+		CNIConfigs: &cnictx.CNIConfigs,
 	}
 	err := ctrl.NewControllerManagedBy(mgr).For(&v1.Node{}).Complete(rNode)
 	if err != nil {
@@ -73,9 +75,9 @@ func (cniconfs *CNIConfigs) OnTrace(mgr manager.Manager, loglevel string) error 
 	return nil
 }
 
-func (cniconfs *CNIConfigs) applyToBIGIPs() error {
+func (cnictx *CNIContext) applyToBIGIPs() error {
 	errs := []string{}
-	for i, c := range *cniconfs {
+	for i, c := range cnictx.CNIConfigs {
 		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
 		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
 
@@ -100,15 +102,15 @@ func (cniconfs *CNIConfigs) applyToBIGIPs() error {
 	}
 }
 
-func (cniconfs *CNIConfigs) applyToK8S() error {
-	for _, cniconf := range *cniconfs {
+func (cnictx *CNIContext) applyToK8S() error {
+	for _, cniconf := range cnictx.CNIConfigs {
 		if cniconf.Calico != nil {
-			if err := cniconf.setupCalicoOnK8S(); err != nil {
+			if err := cniconf.setupCalicoOnK8S(cnictx); err != nil {
 				return err
 			}
 		}
 		if cniconf.Flannel != nil {
-			if err := cniconf.setupFlannelOnK8S(); err != nil {
+			if err := cniconf.setupFlannelOnK8S(cnictx); err != nil {
 				return err
 			}
 		}
@@ -132,11 +134,12 @@ func (cniconf *CNIConfig) bigipUrl() string {
 	return fmt.Sprintf("https://%s:%d", cniconf.Management.IpAddress, *cniconf.Management.Port)
 }
 
-func (cniconf *CNIConfig) setupCalicoOnK8S() error {
+func (cniconf *CNIConfig) setupCalicoOnK8S(ctx context.Context) error {
+	slog := utils.LogFromContext(ctx)
+	calicoset := newCalicoClient(cniconf.kubeConfig)
+
 	group, version := "crd.projectcalico.org", "v1"
 	applyOps := metav1.ApplyOptions{FieldManager: strings.Join([]string{group, version}, "/")}
-
-	calicoset := newCalicoClient(cniconf.kubeConfig)
 
 	gvrBGPConf := schema.GroupVersionResource{
 		Group:    group,
@@ -165,7 +168,7 @@ func (cniconf *CNIConfig) setupCalicoOnK8S() error {
 	if err != nil {
 		return err
 	} else {
-		slog.Debugf("successfully applied BGPConfiguration: %s", applyedConf.GetName())
+		slog.Infof("successfully applied BGPConfiguration: %s", applyedConf.GetName())
 	}
 
 	gvrBGPPr := schema.GroupVersionResource{
@@ -195,13 +198,14 @@ func (cniconf *CNIConfig) setupCalicoOnK8S() error {
 		if err != nil {
 			return err
 		} else {
-			slog.Debugf("successfully applied BGPPeer: %s", appliedPr.GetName())
+			slog.Infof("successfully applied BGPPeer: %s", appliedPr.GetName())
 		}
 	}
 	return nil
 }
 
-func (cniconf *CNIConfig) setupFlannelOnK8S() error {
+func (cniconf *CNIConfig) setupFlannelOnK8S(ctx context.Context) error {
+	slog := utils.LogFromContext(ctx)
 	k8sclient := newKubeClient(cniconf.kubeConfig)
 	for _, nc := range cniconf.Flannel.NodeConfigs {
 		nodeName := fmt.Sprintf("bigip-%s", nc.PublicIP)
