@@ -239,6 +239,7 @@ func (cniconf *CNIConfig) setupFlannelOnBIGIP(bc *f5_bigip.BIGIPContext) error {
 		if err := bc.CreateTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName); err != nil {
 			return err
 		}
+		// TODO: wait for tunnel is created and ready.
 		if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
 			return err
 		} else {
