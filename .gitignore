@@ -2,3 +2,5 @@ vendor
 .vscode
 config.yaml
 password
+__debug_bin
+f5-tool-setup-cni-*
