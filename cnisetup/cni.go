@@ -221,7 +221,7 @@ func (cniconf *CNIConfig) setupFlannelOnK8S(ctx context.Context) error {
 			"flannel.alpha.coreos.com/backend-type":        "vxlan",
 			"flannel.alpha.coreos.com/kube-subnet-manager": "true",
 		})
-		nodeConf.WithSpec(confv1.NodeSpec().WithPodCIDR(nc.PodCIDR))
+		nodeConf = nodeConf.WithSpec(confv1.NodeSpec().WithPodCIDR(nc.PodCIDR))
 		if _, err := k8sclient.CoreV1().Nodes().Apply(context.TODO(), nodeConf, metav1.ApplyOptions{FieldManager: "v1"}); err != nil {
 			return err
 		} else {

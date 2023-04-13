@@ -18,9 +18,11 @@ import (
 
 func main() {
 	var bigipConfig, passwordConfig, kubeConfig string
+	var daemonMode bool
 	flag.StringVar(&kubeConfig, "kube-config", "", "Paths to a kubeconfig. Only required if out-of-cluster. i.e. ~/.kube/config")
 	flag.StringVar(&bigipConfig, "bigip-config", "./config.yaml", "BIG-IP configuration yaml file.")
 	flag.StringVar(&passwordConfig, "bigip-password", "./password", "BIG-IP admin password.")
+	flag.BoolVar(&daemonMode, "daemon", false, "run the tool as a daemon to watch k8s node updates")
 	flag.Parse()
 
 	slog := utils.LogFromContext(context.TODO()).WithLevel(utils.LogLevel_Type_DEBUG)
@@ -39,27 +41,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	restconf := newRestConfig(kubeConfig)
-	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	mgr, err := ctrl.NewManager(restconf, ctrl.Options{
-		Scheme:                 scheme,
-		MetricsBindAddress:     "0",
-		HealthProbeBindAddress: "0",
-	})
-	if err != nil {
-		slog.Errorf("unable to start manager: %s", err.Error())
+	if err := cnisetup.HandleNodeChanges(cnictx); err != nil {
+		slog.Errorf("failed to handle nodes: %s", err.Error())
 		os.Exit(1)
 	}
 
-	if err := cnictx.OnTrace(mgr, utils.LogLevel_Type_DEBUG); err != nil {
-		slog.Errorf("failed to trace on config: %s", err.Error())
-		os.Exit(1)
-	}
+	if daemonMode {
+		restconf := newRestConfig(kubeConfig)
+		scheme := runtime.NewScheme()
+		utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+		mgr, err := ctrl.NewManager(restconf, ctrl.Options{
+			Scheme:                 scheme,
+			MetricsBindAddress:     "0",
+			HealthProbeBindAddress: "0",
+		})
+		if err != nil {
+			slog.Errorf("unable to start manager: %s", err.Error())
+			os.Exit(1)
+		}
 
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		slog.Errorf("failed to start manager: %s", err)
-		os.Exit(1)
+		if err := cnictx.OnTrace(mgr, utils.LogLevel_Type_DEBUG); err != nil {
+			slog.Errorf("failed to trace on config: %s", err.Error())
+			os.Exit(1)
+		}
+
+		if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+			slog.Errorf("failed to start manager: %s", err)
+			os.Exit(1)
+		}
 	}
 }
 
