@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
@@ -128,20 +129,28 @@ func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 	cmd := fmt.Sprintf(`show net tunnels tunnel %s all-properties`, name)
 	slog.Debugf("tmsh cmd: %s", cmd)
 
-	if resp, err := bc.Tmsh(cmd); err != nil {
-		return "", err
-	} else {
-		if (*resp)["commandResult"] != nil {
-			re := regexp.MustCompile("(?:[0-9a-fA-F]:?){12}")
-			macAddress := re.FindString((*resp)["commandResult"].(string))
-			if macAddress == "" {
-				return "", fmt.Errorf("not found macAddress from %s", (*resp)["commandResult"].(string))
-			}
-			return macAddress, nil
+	reMac := regexp.MustCompile("(?:[0-9a-fA-F]:?){12}")
+
+	for times, waits := 30, time.Millisecond*100; times > 0; times-- {
+		if resp, err := bc.Tmsh(cmd); err != nil {
+			return "", err
 		} else {
-			return "", fmt.Errorf("empty response from tmsh '%s', no macaddr retrived", cmd)
+			if rlt, ok := (*resp)["commandResult"]; ok {
+				macAddress := reMac.FindString(rlt.(string))
+				if macAddress == "" {
+					slog.Warnf("not found macAddress from %s", (*resp)["commandResult"].(string))
+				} else {
+					slog.Debugf("got tunnel %s macAddress: %s", name, macAddress)
+					return macAddress, nil
+				}
+			} else {
+				slog.Warnf("empty response from tmsh '%s', no macAddress retrived", cmd)
+			}
+			<-time.After(waits)
 		}
 	}
+
+	return "", fmt.Errorf("timeout for getting tunnel mac address")
 }
 
 func allNodeIpAddrs(ctx context.Context, ns *v1.NodeList) []string {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	f5_bigip "github.com/zongzw/f5-bigip-rest/bigip"
 	"github.com/zongzw/f5-bigip-rest/utils"
@@ -107,28 +106,18 @@ func (cnictx *CNIContext) applyToBIGIPs() error {
 }
 
 func (cnictx *CNIContext) setTunnelMacs() error {
-	errs := []error{}
-	slog := utils.LogFromContext(cnictx.Context)
 	for _, c := range cnictx.CNIConfigs {
 		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
 		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
 		for i, tunnel := range c.Flannel.Tunnels {
-			for times, waits := 30, time.Millisecond*100; times > 0; times-- {
-				if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
-					errs = append(errs, err)
-					break
-				} else if mac == "" {
-					// the mac retrieved may be "" just after the tunnel creation.
-					<-time.After(waits)
-					slog.Debugf("waiting for tunnel creation done.")
-				} else {
-					c.Flannel.Tunnels[i].tunnelMac = mac
-					break
-				}
+			if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
+				return err
+			} else {
+				c.Flannel.Tunnels[i].tunnelMac = mac
 			}
 		}
 	}
-	return utils.MergeErrors(errs)
+	return nil
 }
 
 func (cnictx *CNIContext) applyToK8S() error {
