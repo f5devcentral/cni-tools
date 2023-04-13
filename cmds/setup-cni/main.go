@@ -6,7 +6,7 @@ import (
 	"flag"
 	"os"
 
-	"gitee.com/zongzw/f5-bigip-rest/utils"
+	"github.com/zongzw/f5-bigip-rest/utils"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -19,13 +19,15 @@ import (
 func main() {
 	var bigipConfig, passwordConfig, kubeConfig string
 	var daemonMode bool
+	var loglevel string
 	flag.StringVar(&kubeConfig, "kube-config", "", "Paths to a kubeconfig. Only required if out-of-cluster. i.e. ~/.kube/config")
 	flag.StringVar(&bigipConfig, "bigip-config", "./config.yaml", "BIG-IP configuration yaml file.")
 	flag.StringVar(&passwordConfig, "bigip-password", "./password", "BIG-IP admin password.")
 	flag.BoolVar(&daemonMode, "daemon", false, "run the tool as a daemon to watch k8s node updates")
+	flag.StringVar(&loglevel, "log-level", "info", "logging level: debug, info, warn, error, critical")
 	flag.Parse()
 
-	slog := utils.LogFromContext(context.TODO()).WithLevel(utils.LogLevel_Type_DEBUG)
+	slog := utils.LogFromContext(context.TODO()).WithLevel(loglevel)
 
 	var config cnisetup.CNIConfigs
 	if err := config.Load(bigipConfig, passwordConfig, kubeConfig); err != nil {

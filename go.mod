@@ -6,14 +6,15 @@ require (
 	// # cannot be used since it's NOT a standard module
 	// # search "go.mod incompatible"
 	// github.com/projectcalico/calico v3.25.0+incompatible
+
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1
 )
 
 require (
-	gitee.com/zongzw/f5-bigip-rest v0.0.0-20230208014045-2b40e7962292
 	github.com/google/uuid v1.1.2
+	github.com/zongzw/f5-bigip-rest v1.0.3
 	k8s.io/api v0.26.1
 	sigs.k8s.io/controller-runtime v0.14.4
 )
