@@ -264,7 +264,7 @@ func (cniconf *CNIConfig) parseFlannelConfig() map[string]interface{} {
 	ncfgs := map[string]interface{}{}
 
 	for _, tunnel := range cniconf.Flannel.Tunnels {
-		ncfgs["net/tunnels/vxlan/"+tunnel.ProfileName] = parseVxlanProfile(tunnel.ProfileName, fmt.Sprintf("%d", tunnel.Port))
+		ncfgs["net/tunnels/vxlan/"+tunnel.ProfileName] = parseVxlanProfile(tunnel.ProfileName, tunnel.Port)
 		ncfgs["net/tunnels/tunnel/"+tunnel.Name] = parseTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName)
 	}
 	for _, selfip := range cniconf.Flannel.SelfIPs {

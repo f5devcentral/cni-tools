@@ -249,11 +249,14 @@ func parseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.Node
 	}, nil
 }
 
-func parseVxlanProfile(name, port string) map[string]interface{} {
+// TODO: fix the f5-bigip-rest issue:
+//
+//	The tunnel (/Common/fl-vxlan) cannot be modified or deleted because it is in use by a VXLAN tunnel (/Common/fl-tunnel).
+func parseVxlanProfile(name string, port int) map[string]interface{} {
 	return map[string]interface{}{
 		"name":         name,
 		"floodingType": "none",
-		"port":         port,
+		"port":         float64(port), // same type as retrieved from bigip
 	}
 }
 
