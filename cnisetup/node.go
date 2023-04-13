@@ -44,7 +44,7 @@ func HandleNodeChanges(cnictx CNIContext) error {
 			slog.Errorf("failed to list nodes: %s", err.Error())
 			return err
 		}
-		if ncfgs, err = ParseNodeConfigs(ctx, &c, nodeList); err != nil {
+		if ncfgs, err = parseNodeConfigs(ctx, &c, nodeList); err != nil {
 			return err
 		}
 		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)

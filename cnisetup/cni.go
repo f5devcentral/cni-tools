@@ -77,30 +77,58 @@ func (cnictx *CNIContext) OnTrace(mgr manager.Manager, loglevel string) error {
 }
 
 func (cnictx *CNIContext) applyToBIGIPs() error {
-	errs := []string{}
-	for i, c := range cnictx.CNIConfigs {
+	errs := []error{}
+	ncfgs := map[string]interface{}{}
+	for _, c := range cnictx.CNIConfigs {
 		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
 		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
 
 		if c.Calico != nil {
-			if err := c.setupCalicoOnBIGIP(bc); err != nil {
-				errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-				continue
+			if err := enableBGPRouting(bc); err != nil {
+				return err
+			}
+			calicoCfgs := c.parseCalicoConfig()
+			for k, v := range calicoCfgs {
+				ncfgs[k] = v
 			}
 		}
 
 		if c.Flannel != nil {
-			if err := c.setupFlannelOnBIGIP(bc); err != nil {
-				errs = append(errs, fmt.Sprintf("config #%d: %s", i, err.Error()))
-				continue
+			flannelCfgs := c.parseFlannelConfig()
+			for k, v := range flannelCfgs {
+				ncfgs[k] = v
+			}
+		}
+		errs = append(errs, deploy(bc, "Common", nil, &map[string]interface{}{"": ncfgs}))
+	}
+
+	err := cnictx.setTunnelMacs()
+	return utils.MergeErrors(append(errs, err))
+}
+
+func (cnictx *CNIContext) setTunnelMacs() error {
+	errs := []error{}
+	slog := utils.LogFromContext(cnictx.Context)
+	for _, c := range cnictx.CNIConfigs {
+		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
+		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
+		for i, tunnel := range c.Flannel.Tunnels {
+			for times, waits := 30, time.Millisecond*100; times > 0; times-- {
+				if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
+					errs = append(errs, err)
+					break
+				} else if mac == "" {
+					// the mac retrieved may be "" just after the tunnel creation.
+					<-time.After(waits)
+					slog.Debugf("waiting for tunnel creation done.")
+				} else {
+					c.Flannel.Tunnels[i].tunnelMac = mac
+					break
+				}
 			}
 		}
 	}
-	if len(errs) != 0 {
-		return fmt.Errorf(strings.Join(errs, "; "))
-	} else {
-		return nil
-	}
+	return utils.MergeErrors(errs)
 }
 
 func (cnictx *CNIContext) applyToK8S() error {
@@ -232,46 +260,26 @@ func (cniconf *CNIConfig) setupFlannelOnK8S(ctx context.Context) error {
 	return nil
 }
 
-func (cniconf *CNIConfig) setupFlannelOnBIGIP(bc *f5_bigip.BIGIPContext) error {
-	slog := utils.LogFromContext(bc.Context)
-	for i, tunnel := range cniconf.Flannel.Tunnels {
-		if err := bc.CreateVxlanProfile(tunnel.ProfileName, fmt.Sprintf("%d", tunnel.Port)); err != nil {
-			return err
-		}
-		if err := bc.CreateTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName); err != nil {
-			return err
-		}
+func (cniconf *CNIConfig) parseFlannelConfig() map[string]interface{} {
+	ncfgs := map[string]interface{}{}
 
-		for times, waits := 30, time.Millisecond*100; times > 0; times-- {
-			if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
-				return err
-			} else if mac == "" {
-				// the mac retrieved may be "" just after the tunnel creation.
-				<-time.After(waits)
-				slog.Debugf("waiting for tunnel creation done.")
-			} else {
-				cniconf.Flannel.Tunnels[i].tunnelMac = mac
-				break
-			}
-		}
-
+	for _, tunnel := range cniconf.Flannel.Tunnels {
+		ncfgs["net/tunnels/vxlan/"+tunnel.ProfileName] = parseVxlanProfile(tunnel.ProfileName, fmt.Sprintf("%d", tunnel.Port))
+		ncfgs["net/tunnels/tunnel/"+tunnel.Name] = parseTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName)
 	}
 	for _, selfip := range cniconf.Flannel.SelfIPs {
-		if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
-			return err
-		}
+		ncfgs["net/self/"+selfip.Name] = parseSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName)
 	}
-	return nil
+
+	return ncfgs
 }
 
-func (cniconf *CNIConfig) setupCalicoOnBIGIP(bc *f5_bigip.BIGIPContext) error {
-	if err := enableBGPRouting(bc); err != nil {
-		return err
-	}
+func (cniconf *CNIConfig) parseCalicoConfig() map[string]interface{} {
+
+	ncfgs := map[string]interface{}{}
 	for _, selfip := range cniconf.Calico.SelfIPs {
-		if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
-			return err
-		}
+		ncfgs["net/self/"+selfip.Name] = parseSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName)
 	}
-	return nil
+
+	return ncfgs
 }

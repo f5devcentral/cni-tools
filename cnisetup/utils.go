@@ -144,38 +144,6 @@ func macAddrOfTunnel(bc *f5_bigip.BIGIPContext, name string) (string, error) {
 	}
 }
 
-func ParseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]interface{}, error) {
-	cfgs := map[string]interface{}{}
-
-	if cniconf.Calico != nil {
-		nIpAddresses := allNodeIpAddrs(ctx, nodeList)
-		if ccfgs, err := parseNeighsFrom("gwcBGP", cniconf.Calico.LocalAS, cniconf.Calico.RemoteAS, nIpAddresses); err != nil {
-			return map[string]interface{}{}, err
-		} else {
-			for k, v := range ccfgs {
-				cfgs[k] = v
-			}
-		}
-	}
-
-	if cniconf.Flannel != nil {
-		nIpToMacV4, _ := allNodeIPMacAddrs(ctx, nodeList)
-		for _, tunnel := range cniconf.Flannel.Tunnels {
-			if fcfgs, err := parseFdbsFrom(tunnel.Name, nIpToMacV4); err != nil {
-				return map[string]interface{}{}, err
-			} else {
-				for k, v := range fcfgs {
-					cfgs[k] = v
-				}
-			}
-		}
-	}
-
-	return map[string]interface{}{
-		"": cfgs,
-	}, nil
-}
-
 func allNodeIpAddrs(ctx context.Context, ns *v1.NodeList) []string {
 	rlt := []string{}
 	ipv4, ipv6 := allNodeIPMacAddrs(ctx, ns)
@@ -247,6 +215,64 @@ func allNodeIPMacAddrs(ctx context.Context, ns *v1.NodeList) (map[string]string,
 
 	}
 	return rlt4, rlt6
+}
+
+func parseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]interface{}, error) {
+	cfgs := map[string]interface{}{}
+
+	if cniconf.Calico != nil {
+		nIpAddresses := allNodeIpAddrs(ctx, nodeList)
+		if ccfgs, err := parseNeighsFrom("gwcBGP", cniconf.Calico.LocalAS, cniconf.Calico.RemoteAS, nIpAddresses); err != nil {
+			return map[string]interface{}{}, err
+		} else {
+			for k, v := range ccfgs {
+				cfgs[k] = v
+			}
+		}
+	}
+
+	if cniconf.Flannel != nil {
+		nIpToMacV4, _ := allNodeIPMacAddrs(ctx, nodeList)
+		for _, tunnel := range cniconf.Flannel.Tunnels {
+			if fcfgs, err := parseFdbsFrom(tunnel.Name, nIpToMacV4); err != nil {
+				return map[string]interface{}{}, err
+			} else {
+				for k, v := range fcfgs {
+					cfgs[k] = v
+				}
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"": cfgs,
+	}, nil
+}
+
+func parseVxlanProfile(name, port string) map[string]interface{} {
+	return map[string]interface{}{
+		"name":         name,
+		"floodingType": "none",
+		"port":         port,
+	}
+}
+
+func parseTunnel(name, key, address, profile string) map[string]interface{} {
+	return map[string]interface{}{
+		"name":         name,
+		"key":          key,
+		"localAddress": address,
+		"profile":      profile,
+	}
+}
+
+func parseSelf(name, address, vlan string) map[string]interface{} {
+	return map[string]interface{}{
+		"name":         name,
+		"address":      address,
+		"vlan":         vlan,
+		"allowService": "all",
+	}
 }
 
 func parseNeighsFrom(routerName, localAs, remoteAs string, addresses []string) (map[string]interface{}, error) {
