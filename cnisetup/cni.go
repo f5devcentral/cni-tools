@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	f5_bigip "github.com/zongzw/f5-bigip-rest/bigip"
 	"github.com/zongzw/f5-bigip-rest/utils"
@@ -232,6 +233,7 @@ func (cniconf *CNIConfig) setupFlannelOnK8S(ctx context.Context) error {
 }
 
 func (cniconf *CNIConfig) setupFlannelOnBIGIP(bc *f5_bigip.BIGIPContext) error {
+	slog := utils.LogFromContext(bc.Context)
 	for i, tunnel := range cniconf.Flannel.Tunnels {
 		if err := bc.CreateVxlanProfile(tunnel.ProfileName, fmt.Sprintf("%d", tunnel.Port)); err != nil {
 			return err
@@ -239,12 +241,20 @@ func (cniconf *CNIConfig) setupFlannelOnBIGIP(bc *f5_bigip.BIGIPContext) error {
 		if err := bc.CreateTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName); err != nil {
 			return err
 		}
-		// TODO: wait for tunnel is created and ready.
-		if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
-			return err
-		} else {
-			cniconf.Flannel.Tunnels[i].tunnelMac = mac
+
+		for times, waits := 30, time.Millisecond*100; times > 0; times-- {
+			if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
+				return err
+			} else if mac == "" {
+				// the mac retrieved may be "" just after the tunnel creation.
+				<-time.After(waits)
+				slog.Debugf("waiting for tunnel creation done.")
+			} else {
+				cniconf.Flannel.Tunnels[i].tunnelMac = mac
+				break
+			}
 		}
+
 	}
 	for _, selfip := range cniconf.Flannel.SelfIPs {
 		if err := bc.CreateSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName); err != nil {
