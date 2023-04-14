@@ -1,23 +1,23 @@
-# - management:
-#     username: admin
-#     ipAddress: 10.250.2.219
-#     # port: 443
-#   flannel:
-#     tunnels:
-#       - name: fl-tunnel
-#         profileName: fl-vxlan
-#         port: 8472
-#         localAddress: 10.250.17.219
-#     selfIPs:
-#       - name: flannel-self
-#         ipMask: 10.42.20.1/16
-#         vlanOrTunnelName: fl-tunnel
-#       - name: self-17
-#         ipMask: 10.250.17.219/24
-#         vlanOrTunnelName: vlan-17
-#     nodeConfigs:
-#       - publicIP: 10.250.17.219
-#         podCIDR: 10.42.20.0/24
+- management:
+    username: admin
+    ipAddress: 10.250.2.219
+    port: 443
+  flannel:
+    tunnels:
+      - name: fl-tunnel
+        profileName: fl-vxlan
+        port: 8472
+        localAddress: 10.250.17.219
+    selfIPs:
+      - name: flannel-self
+        ipMask: 10.42.20.1/16
+        vlanOrTunnelName: fl-tunnel
+      - name: self-17
+        ipMask: 10.250.17.219/24
+        vlanOrTunnelName: vlan-17
+    nodeConfigs:
+      - publicIP: 10.250.17.219
+        podCIDR: 10.42.20.0/24
 
 - management:
     username: admin

@@ -9,33 +9,30 @@ Supported CNIs: Flannel and Calico.
 To run it, use the following parameters:
 
 ```
-  --bigip-config string
+  -bigip-config string
         BIG-IP configuration yaml file. (default "./config.yaml")
-  --bigip-password string
+  -bigip-password string
         BIG-IP admin password. (default "./password")
-  --kube-config string
+  -daemon
+        run the tool as a daemon to watch k8s node updates
+  -kube-config string
         Paths to a kubeconfig. Only required if out-of-cluster. i.e. ~/.kube/config
+  -log-level string
+        logging level: debug, info, warn, error, critical (default "info")
 ```
 
 ## Functionalities
 
-By providing the above 3 configurations, the tool may automatically do BIG-IP and Kubernetes CNI settings, including:
+By providing the above configurations, the tool can automatically do BIG-IP and Kubernetes CNI settings, including:
 
-* Kubernetes side:
+* Flannel
 
-  * For flannel:
+
+  * Kubernetes side:
 
     * Create virtual BIG-IP node for vxlan tunnel setup
 
-  * For calico:
-
-    * Create "crd.projectcalico.org/v1" BGPConfiguration and BGPPeer resources
-
-      Notice that "crd.projectcalico.org/v1" is also known as "projectcalico.org/v3".
-
-* BIG-IP side:
-
-  * For flannel:
+  * BIG-IP side:
 
     * Create vxlan profile for binding to the very tunnel
 
@@ -43,13 +40,21 @@ By providing the above 3 configurations, the tool may automatically do BIG-IP an
 
     * Create relative self-IP as tunnel VTEP
 
-  * For calico:
+* Calico:
+
+  * Kubernetes side:
+
+    * Create "crd.projectcalico.org/v1" BGPConfiguration and BGPPeer resources
+
+      Notice that "crd.projectcalico.org/v1" is also known as "projectcalico.org/v3".
+
+  * BIG-IP side:
 
     * Configure BGP protocol
 
     * Add kubernetes' nodes as bgp neighbors
 
-* Watch kubernetes' node changes and apply the latest states to BIG-IP.
+* (*In daemon mode only*) Watch kubernetes' node changes and apply the latest states to BIG-IP.
 
 Support IPv6, but not fully verified, please open the issue if necessary.
 
