@@ -17,8 +17,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	f5_bigip "github.com/zongzw/f5-bigip-rest/bigip"
-	"github.com/zongzw/f5-bigip-rest/utils"
+	f5_bigip "github.com/f5devcentral/f5-bigip-rest/bigip"
+	"github.com/f5devcentral/f5-bigip-rest/utils"
 )
 
 // func init() {

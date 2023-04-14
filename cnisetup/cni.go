@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	f5_bigip "github.com/zongzw/f5-bigip-rest/bigip"
-	"github.com/zongzw/f5-bigip-rest/utils"
+	f5_bigip "github.com/f5devcentral/f5-bigip-rest/bigip"
+	"github.com/f5devcentral/f5-bigip-rest/utils"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

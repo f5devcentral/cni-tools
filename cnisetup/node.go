@@ -3,9 +3,9 @@ package cnisetup
 import (
 	"context"
 
+	f5_bigip "github.com/f5devcentral/f5-bigip-rest/bigip"
+	"github.com/f5devcentral/f5-bigip-rest/utils"
 	"github.com/google/uuid"
-	f5_bigip "github.com/zongzw/f5-bigip-rest/bigip"
-	"github.com/zongzw/f5-bigip-rest/utils"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
