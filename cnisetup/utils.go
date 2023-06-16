@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +18,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	f5_bigip "github.com/f5devcentral/f5-bigip-rest/bigip"
-	"github.com/f5devcentral/f5-bigip-rest/utils"
+	f5_bigip "github.com/f5devcentral/f5-bigip-rest-go/bigip"
+	"github.com/f5devcentral/f5-bigip-rest-go/utils"
 )
 
 // func init() {
@@ -226,6 +227,25 @@ func allNodeIPMacAddrs(ctx context.Context, ns *v1.NodeList) (map[string]string,
 	return rlt4, rlt6
 }
 
+func allNodesIP2Macs(ctx context.Context, ns *v1.NodeList) (map[string]string, map[string]string) {
+	rlt4 := map[string]string{}
+	rlt6 := map[string]string{}
+
+	for _, n := range ns.Items {
+		addrs := n.Status.Addresses
+		ipaddr := ""
+		for _, addr := range addrs {
+			if addr.Type == v1.NodeInternalIP {
+				ipaddr = addr.Address
+				break
+			}
+		}
+		rlt4[ipaddr] = ipv4ToMac(ipaddr)
+	}
+
+	return rlt4, rlt6
+}
+
 func parseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.NodeList) (map[string]interface{}, error) {
 	cfgs := map[string]interface{}{}
 
@@ -252,6 +272,18 @@ func parseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.Node
 			}
 		}
 	}
+	if cniconf.Cilium != nil {
+		nIpToMacV4, _ := allNodesIP2Macs(ctx, nodeList)
+		for _, tunnel := range cniconf.Cilium.Tunnels {
+			if fcfgs, err := parseFdbsFrom(tunnel.Name, nIpToMacV4); err != nil {
+				return map[string]interface{}{}, err
+			} else {
+				for k, v := range fcfgs {
+					cfgs[k] = v
+				}
+			}
+		}
+	}
 
 	return map[string]interface{}{
 		"": cfgs,
@@ -261,10 +293,10 @@ func parseNodeConfigs(ctx context.Context, cniconf *CNIConfig, nodeList *v1.Node
 // TODO: fix the f5-bigip-rest issue:
 //
 //	The tunnel (/Common/fl-vxlan) cannot be modified or deleted because it is in use by a VXLAN tunnel (/Common/fl-tunnel).
-func parseVxlanProfile(name string, port int) map[string]interface{} {
+func parseVxlanProfile(name string, port int, floodingType string) map[string]interface{} {
 	return map[string]interface{}{
 		"name":         name,
-		"floodingType": "none",
+		"floodingType": floodingType,
 		"port":         float64(port), // same type as retrieved from bigip
 	}
 }
@@ -328,4 +360,17 @@ func parseFdbsFrom(tunnelName string, iPToMac map[string]string) (map[string]int
 	rlt["net/fdb/tunnel/"+tunnelName].(map[string]interface{})["records"] = fmtrecords
 
 	return rlt, nil
+}
+
+// Convert an IPV4 string to a fake MAC address.
+func ipv4ToMac(addr string) string {
+	ip := strings.Split(addr, ".")
+	if len(ip) != 4 {
+		return ""
+	}
+	var intIP [4]int
+	for i, val := range ip {
+		intIP[i], _ = strconv.Atoi(val)
+	}
+	return fmt.Sprintf("0a:0a:%02x:%02x:%02x:%02x", intIP[0], intIP[1], intIP[2], intIP[3])
 }

@@ -33,3 +33,23 @@
     peerIPs:
       - 10.250.17.220
     
+- management:
+    username: admin
+    ipAddress: 10.250.2.220
+    # port: 443
+  cilium:
+    tunnels:
+      - name: fl-tunnel
+        profileName: fl-vxlan
+        port: 8472
+        localAddress: 10.250.16.105
+    selfIPs:
+      - name: flannel-self
+        ipMask: 10.0.20.1/24
+        vlanOrTunnelName: fl-tunnel
+      - name: self-16
+        ipMask: 10.250.16.105/24
+        vlanOrTunnelName: vlan-16
+    routes:
+      - network: 10.0.0.0/16
+        tmInterface: fl-tunnel

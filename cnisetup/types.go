@@ -42,5 +42,19 @@ type CNIConfig struct {
 		SelfIPs  []BIGIPSelfIP `yaml:"selfIPs"`
 		PeerIPs  []string      `yaml:"peerIPs"`
 	}
+	Cilium *struct {
+		Tunnels []struct {
+			Name         string
+			ProfileName  string `yaml:"profileName"`
+			Port         int
+			LocalAddress string `yaml:"localAddress"`
+			tunnelMac    string
+		}
+		SelfIPs []BIGIPSelfIP `yaml:"selfIPs"`
+		Routes  []struct {
+			Network     string
+			TmInterface string `yaml:"tmInterface"`
+		}
+	}
 	kubeConfig string
 }

@@ -13,7 +13,7 @@ require (
 )
 
 require (
-	github.com/f5devcentral/f5-bigip-rest v1.0.6
+	github.com/f5devcentral/f5-bigip-rest-go v1.0.9
 	github.com/google/uuid v1.3.0
 	k8s.io/api v0.26.1
 	sigs.k8s.io/controller-runtime v0.14.4

@@ -2,7 +2,7 @@
 
 This is a tool used to setup CNI integration between BIG-IP and Kubernetes.
 
-Supported CNIs: Flannel and Calico.
+Supported CNIs: Flannel, Calico, Cilium.
 
 ## Usage
 
@@ -36,7 +36,7 @@ By providing the above configurations, the tool can automatically do BIG-IP and 
 
     * Create vxlan profile for binding to the very tunnel
 
-    * Create vxlan tunnel
+    * Create vxlan tunnel, and fdb records
 
     * Create relative self-IP as tunnel VTEP
 
@@ -53,6 +53,24 @@ By providing the above configurations, the tool can automatically do BIG-IP and 
     * Configure BGP protocol
 
     * Add kubernetes' nodes as bgp neighbors
+
+* Cilium:
+
+  * Kubernetes side:
+
+    * Do nothing but giving a helm command prompt for user to manually do cilium setup.
+
+      Because cilium installation depends cilium_cli or helm tools, currently, we left this operation to user.
+
+  * BIG-IP side:
+
+    * Create vxlan profile for binding to the very tunnel
+
+    * Create vxlan tunnel, and fdb records
+
+    * Create relative self-IP as tunnel VTEP
+
+    * Create the route for vxlan traffic to/from k8s nodes
 
 * (*In daemon mode only*) Watch kubernetes' node changes and apply the latest states to BIG-IP.
 
@@ -127,4 +145,37 @@ Multiple configurations can be manipulated in a time.
     # the self ip used as the peer to interconnect with k8s.
     peerIPs:
       - 10.250.17.220
+  # optional, overlay network configuration for cilium CNI mode
+  # if it is commented, 'cilium' should also be commented: # cilium
+  # there will be no cilium configuration to k8s or bigip
+  cilium:
+    # tunnels configuration
+    tunnels:
+        # tunnel name
+      - name: fl-tunnel
+        # tunnel profile name for binding to the very tunnel
+        profileName: fl-vxlan
+        # tunnel profile port for binding to the very tunnel
+        port: 8472
+        # the local address for the tunnel(VTEP)
+        # this will be referred in nodeConfigs part.
+        localAddress: 10.250.17.219
+    # selfips configuration
+    selfIPs:
+        # the name of the self IP address definition
+      - name: flannel-self
+        # the IP address associated to the vxlan tunnel.
+        #   the mask must NOT be 16 which is as same as the route.
+        ipMask: 10.42.20.1/24
+        # vlan or tunnel name, should match one of the tunnels
+        vlanOrTunnelName: fl-tunnel
+      - name: self-17
+        ipMask: 10.250.17.219/24
+        vlanOrTunnelName: vlan-17
+    # route configuration for traffic from/to k8s pods
+    routes:
+        # the network of pod network cidr.
+      - network: 10.0.0.0/16
+        # the tunnel name which should exists in tunnels session.
+        tmInterface: fl-tunnel
 ```

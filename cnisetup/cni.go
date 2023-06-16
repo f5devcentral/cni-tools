@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	f5_bigip "github.com/f5devcentral/f5-bigip-rest/bigip"
-	"github.com/f5devcentral/f5-bigip-rest/utils"
+	f5_bigip "github.com/f5devcentral/f5-bigip-rest-go/bigip"
+	"github.com/f5devcentral/f5-bigip-rest-go/utils"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -98,6 +98,13 @@ func (cnictx *CNIContext) applyToBIGIPs() error {
 				ncfgs[k] = v
 			}
 		}
+
+		if c.Cilium != nil {
+			ciliumCfgs := c.parseCiliumConfig()
+			for k, v := range ciliumCfgs {
+				ncfgs[k] = v
+			}
+		}
 		errs = append(errs, deploy(bc, "Common", nil, &map[string]interface{}{"": ncfgs}))
 	}
 
@@ -109,6 +116,9 @@ func (cnictx *CNIContext) setTunnelMacs() error {
 	for _, c := range cnictx.CNIConfigs {
 		bigip := f5_bigip.New(c.bigipUrl(), c.Management.Username, c.Management.password)
 		bc := &f5_bigip.BIGIPContext{BIGIP: *bigip, Context: context.TODO()}
+		if c.Flannel == nil {
+			continue
+		}
 		for i, tunnel := range c.Flannel.Tunnels {
 			if mac, err := macAddrOfTunnel(bc, tunnel.Name); err != nil {
 				return err
@@ -129,6 +139,11 @@ func (cnictx *CNIContext) applyToK8S() error {
 		}
 		if cniconf.Flannel != nil {
 			if err := cniconf.setupFlannelOnK8S(cnictx); err != nil {
+				return err
+			}
+		}
+		if cniconf.Cilium != nil {
+			if err := cniconf.setupCiliumOnK8S(cnictx); err != nil {
 				return err
 			}
 		}
@@ -249,11 +264,44 @@ func (cniconf *CNIConfig) setupFlannelOnK8S(ctx context.Context) error {
 	return nil
 }
 
+func (cniconf *CNIConfig) setupCiliumOnK8S(ctx context.Context) error {
+	slog := utils.LogFromContext(ctx)
+
+	slog.Infof("Please confirm cilium is installed as expected. ")
+	slog.Infof(" 	And run the following command line on k8s control-plane node:")
+	slog.Infof("	If there are multiple BIG-IPs configured for the same k8s, you may need to combine the vtep part.")
+	slog.Infof(`
+		helm upgrade cilium <downloaded cilium installation directory>/install/kubernetes/cilium \
+			--namespace kube-system \
+			--set rollOutCiliumPods=true \
+			--set debug.enabled=true \
+			--set kubeProxyReplacement=strict \
+			--set ipam.mode="kubernetes" \
+			--set k8sServiceHost=%s \
+			--set k8sServicePort=%s \
+			--set l7Proxy=false \
+			--set vtep.enabled="true" \
+			--set vtep.endpoint="%s" \
+			--set vtep.mask="%s" \
+			--set vtep.cidr="%s" \
+			--set vtep.mac="%s" 
+	`,
+		"<k8s api-server host>",
+		"<k8s api-server port>",
+		"<traffic selfip>",
+		"<traffic selfip mask>",
+		"<tunnel selfip>/<tunnel selfip mask>",
+		"<tunnel mac from: tmsh show net tunnels tunnel fl-tunnel all-properties>",
+	)
+
+	return nil
+}
+
 func (cniconf *CNIConfig) parseFlannelConfig() map[string]interface{} {
 	ncfgs := map[string]interface{}{}
 
 	for _, tunnel := range cniconf.Flannel.Tunnels {
-		ncfgs["net/tunnels/vxlan/"+tunnel.ProfileName] = parseVxlanProfile(tunnel.ProfileName, tunnel.Port)
+		ncfgs["net/tunnels/vxlan/"+tunnel.ProfileName] = parseVxlanProfile(tunnel.ProfileName, tunnel.Port, "none")
 		ncfgs["net/tunnels/tunnel/"+tunnel.Name] = parseTunnel(tunnel.Name, "1", tunnel.LocalAddress, tunnel.ProfileName)
 	}
 	for _, selfip := range cniconf.Flannel.SelfIPs {
@@ -270,5 +318,31 @@ func (cniconf *CNIConfig) parseCalicoConfig() map[string]interface{} {
 		ncfgs["net/self/"+selfip.Name] = parseSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName)
 	}
 
+	return ncfgs
+}
+
+func (cniconf *CNIConfig) parseCiliumConfig() map[string]interface{} {
+	ncfgs := map[string]interface{}{}
+	slog := utils.LogFromContext(context.TODO())
+
+	for _, tunnel := range cniconf.Cilium.Tunnels {
+		ncfgs["net/tunnels/vxlan/"+tunnel.ProfileName] = parseVxlanProfile(tunnel.ProfileName, tunnel.Port, "multipoint")
+		ncfgs["net/tunnels/tunnel/"+tunnel.Name] = parseTunnel(tunnel.Name, "2", tunnel.LocalAddress, tunnel.ProfileName)
+	}
+	for _, selfip := range cniconf.Cilium.SelfIPs {
+		ncfgs["net/self/"+selfip.Name] = parseSelf(selfip.Name, selfip.IpMask, selfip.VlanOrTunnelName)
+	}
+	for _, route := range cniconf.Cilium.Routes {
+		rn := strings.Split(route.Network, "/")
+		if len(rn) != 2 {
+			slog.Errorf("invalid route configuration: Network: %s", route.Network)
+			continue
+		}
+		ncfgs["net/route/"+rn[0]] = map[string]interface{}{
+			"tmInterface": route.TmInterface,
+			"name":        rn[0],
+			"network":     route.Network,
+		}
+	}
 	return ncfgs
 }
