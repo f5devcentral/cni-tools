@@ -1,3 +1,10 @@
+**********
+
+**Refer to https://gitee.com/zongzw/f5-tool-setup-cni for newly update.**
+
+**********
+
+
 # F5 Tool: Setup CNI
 
 This is a tool used to setup CNI integration between BIG-IP and Kubernetes.
